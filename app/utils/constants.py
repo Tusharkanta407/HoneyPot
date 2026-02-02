@@ -1,0 +1,1 @@
+# Scam types, persona maps
