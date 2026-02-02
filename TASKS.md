@@ -11,7 +11,7 @@
 
 ---
 
-## PHASE 2 — SESSION & MEMORY
+## PHASE 2 — SESSION & MEMORY(Tushar)
 
 - [ ] Implement session_store.py
 - [ ] Create session using sessionId
@@ -21,7 +21,7 @@
 
 ---
 
-## PHASE 3 — SCAM DETECTION
+## PHASE 3 — SCAM DETECTION(Sradha)
 
 - [ ] Integrate scam_detector_agent.py
 - [ ] Call detection ONLY on first message
