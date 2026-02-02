@@ -4,10 +4,10 @@
 
 ## PHASE 1 — PROJECT SETUP
 
-- [ ] Create FastAPI project
-- [ ] Add .env for API keys
-- [ ] Setup requirements.txt
-- [ ] Create base folder structure
+- [x] Create FastAPI project
+- [x] Add .env for API keys
+- [x] Setup requirements.txt
+- [x] Create base folder structure
 
 ---
 
