@@ -1,1 +1,1 @@
-# HER - Scam detection agent (calls detection_tools)
+# Sradha - Scam detection agent (calls detection_tools)
