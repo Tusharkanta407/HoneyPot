@@ -114,7 +114,7 @@ class ScamTypeIdentificationTool(BaseTool):
     
     def _run(self, message: str) -> dict:
         """Identify specific scam type"""
-        
+         
         message_lower = message.lower()
         
         # Detailed type identification
@@ -176,37 +176,3 @@ class UrgencyDetectionTool(BaseTool):
             'urgency_score': urgency_score,
             'keywords_found': found_keywords
         }
-# TESTING
-if __name__ == "__main__":
-    # Test the tools
-    print("Testing Scam Detection Tools\n")
-    print("="*70)
-    
-    # Create tool instances
-    scam_tool = ScamDetectionTool()
-    type_tool = ScamTypeIdentificationTool()
-    urgency_tool = UrgencyDetectionTool()
-    
-    # Test message
-    test_message = "Congratulations! You won Rs 10,00,000! Call now urgently!"
-    
-    print(f"Test Message: {test_message}\n")
-    
-    # Test scam detection
-    print("1. Scam Detection:")
-    result1 = scam_tool._run(test_message)
-    print(f"   Result: {result1}\n")
-    
-    # Test type identification
-    print("2. Type Identification:")
-    result2 = type_tool._run(test_message)
-    print(f"   Result: {result2}\n")
-    
-    # Test urgency detection
-    print("3. Urgency Detection:")
-    result3 = urgency_tool._run(test_message)
-    print(f"   Result: {result3}\n")
-    print("="*70)
-    print("All tools working correctly! ✓")
-    # Working 
-    
