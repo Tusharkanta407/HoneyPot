@@ -17,11 +17,11 @@ from app.memory.session_store import (
     append_message,
     update_detection,
 )
-from app.tools.detection_tools import ScamDetectionTool
+from app.tools.detection_tools import HybridScamDetectionTool
 
 app = FastAPI(title="Honeypot AI")
 
-_scam_tool = ScamDetectionTool()
+_scam_tool = HybridScamDetectionTool()
 
 
 class MessageModel(BaseModel):
