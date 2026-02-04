@@ -1,13 +1,14 @@
-"""
-FastAPI app entry point.
-For now we only implement:
-- Phase 2: session creation & tracking
-- Phase 3: first-message scam detection using detection_tools
-"""
-
+import logging
+import traceback
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI
+
+from pathlib import Path
+import os
+
+from dotenv import load_dotenv
+load_dotenv(override=True)
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.memory.session_store import (
@@ -16,19 +17,23 @@ from app.memory.session_store import (
     get_session,
     append_message,
     update_detection,
+    update_persona,
+    add_extracted
 )
-from app.tools.detection_tools import HybridScamDetectionTool
+from app.tools.detection_tools import ScamDetectionTool
+# NEW: Import the Manager
+from app.chains.agent_manager import AgentManager
 
 app = FastAPI(title="Honeypot AI")
 
-_scam_tool = HybridScamDetectionTool()
-
+# Initialize Global Tools
+_scam_tool = ScamDetectionTool()
+_agent_manager = AgentManager()
 
 class MessageModel(BaseModel):
     sender: str
     text: str
     timestamp: Optional[int] = None
-
 
 class IncomingModel(BaseModel):
     sessionId: str
@@ -36,58 +41,113 @@ class IncomingModel(BaseModel):
     conversationHistory: Optional[List[Dict[str, Any]]] = []
     metadata: Optional[Dict[str, Any]] = {}
 
-
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "honeypot-phase-2-3-ready"}
-
+    return {"status": "ok", "message": "honeypot-agent-active"}
 
 @app.post("/honeypot")
 def honeypot_endpoint(payload: IncomingModel):
     """
-    Each call is ONE incoming message.
-    Goal for now:
-    - ensure a session exists
-    - append the message to that session
-    - if this is the FIRST message for the session,
-      run ScamDetectionTool to decide scam/not scam
-    - return ONLY detection info + basic session info
+    Core Logic Loop:
+    1. Input: Receive message.
+    2. Detection: Analyze (Message + History) -> is_scam?
+    3. Decision: 
+       - If Safe -> Monitoring Mode (Neutral Persona)
+       - If Scam -> Active Mode (Victim Persona)
+    4. Action: Generate Reply using Persona.
+    5. Output: Return reply + intelligence.
     """
     session_id = payload.sessionId
+    
+    try:
+        # 1. SETUP SESSION
+        if not session_exists(session_id):
+            create_session(session_id)
+        
+        # Append incoming message to memory
+        msg_in = {
+            "sender": payload.message.sender,
+            "text": payload.message.text,
+            "timestamp": payload.message.timestamp,
+        }
+        append_message(session_id, msg_in)
+        
+        # Load up-to-date session
+        session = get_session(session_id)
+        history = session["messages"]
 
-    # 1) create or load session
-    if not session_exists(session_id):
-        create_session(session_id)
+        # 2. CONTINUOUS DETECTION
+        # We check EVERY message to see if it turns into a scam
+        # (Optimization: If already confirmed scam, we can skip detection or run it lightly)
+        
+        is_already_known_scam = session.get("is_scam", False)
+        detection_result = {
+            "is_scam": is_already_known_scam,
+            "scam_type": session.get("scam_type", "none"),
+            "confidence": session.get("confidence", 0.0)
+        }
 
-    session = get_session(session_id)
+        # If not yet confirmed 100%, keep checking
+        if not is_already_known_scam:
+            try:
+                # Run Hybrid Detection
+                # Pass history to detection tool context
+                det_res = _scam_tool._run(payload.message.text, history=history)
+                
+                # Update if checks find something
+                if det_res["is_scam"]:
+                    update_detection(
+                        session_id,
+                        True,
+                        det_res["scam_type"],
+                        det_res["confidence"]
+                    )
+                    detection_result = det_res
+                    
+            except Exception as e:
+                logging.error(f"Detection failed: {e}")
 
-    # 2) append current message
-    msg = {
-        "sender": payload.message.sender,
-        "text": payload.message.text,
-        "timestamp": payload.message.timestamp,
-    }
-    append_message(session_id, msg)
-
-    # 3) if first message -> detect scam using detection_tools
-    is_first = session["total_messages"] == 1
-    if is_first:
-        result = _scam_tool._run(payload.message.text)
-        update_detection(
-            session_id,
-            result["is_scam"],
-            result["scam_type"],
-            result["confidence"],
+        # 3. AGENT EXECUTION (The "Reply" Phase)
+        # The AgentManager handles persona selection (Neutral vs Victim) internally
+        agent_out = _agent_manager.run_agent(
+            msg_text=payload.message.text,
+            history=history,
+            session=session,
+            scam_details=detection_result
         )
 
-    # 4) build response from session state (not from tool directly)
-    session = get_session(session_id)  # refresh after update
-    return {
-        "status": "success",
-        "sessionId": session_id,
-        "is_scam": session["is_scam"],
-        "scam_type": session["scam_type"],
-        "confidence": session["confidence"],
-        "total_messages": session["total_messages"],
-    }
-# something changesd 
+        reply_text = agent_out["reply"]
+        
+        # Save any new persona assignment
+        if agent_out.get("is_new_persona"):
+            update_persona(session_id, agent_out["persona_id"])
+
+        # 4. STORE OUTGOING REPLY
+        msg_out = {
+            "sender": "agent",
+            "text": reply_text,
+            "timestamp": None # Current time ideally
+        }
+        append_message(session_id, msg_out)
+
+        # 5. FINAL RESPONSE
+        # Refresh session to get latest state
+        s_final = get_session(session_id)
+        
+        return {
+            "status": "success",
+            "sessionId": session_id,
+            "is_scam": s_final["is_scam"],
+            "scam_type": s_final["scam_type"],
+            "generated_response": reply_text,
+            "persona": s_final["persona"],
+            "confidence": s_final["confidence"],
+            # TODO: Add extracted intelligence here
+            "intelligence": s_final["extracted"]
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+

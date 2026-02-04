@@ -1,20 +1,13 @@
 fastapi>=0.100.0
 uvicorn>=0.22.0
 
+# LangChain (use >= for compatibility; strict mode needs langchain-openai>=0.1.21)
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.0.13
+langchain-openai>=0.1.21
 
-
-langchain==0.1.0
-langchain-openai==0.0.5
-langchain-community==0.0.13
-
-
-openai==1.10.0
-
-
-pydantic==2.5.0
-
-
-python-dotenv==1.0.0
-
-
-
+openai>=2.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+httpx>=0.24.0

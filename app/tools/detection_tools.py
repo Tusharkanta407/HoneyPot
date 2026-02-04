@@ -1,15 +1,15 @@
-from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import PydanticOutputParser
-from langchain.tools import BaseTool
+import re
+import os
+import httpx
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 from typing import Optional, Type
-from pydantic import PrivateAttr
-import re
-import os
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 
 class ScamDetectionInput(BaseModel):
@@ -48,7 +48,27 @@ class RuleBasedScamDetectionTool(BaseTool):
     
     def _run(self, message: str) -> dict:
         """Rule-based detection"""
-        
+        message_lower = message.lower().strip()
+
+        # --- Anti-scam / warning message check (avoid false positives) ---
+        # Messages that WARN about scams (e.g. "Do not share OTP") are not scams.
+        warning_phrases = [
+            r"do\s+not\s+share", r"don'?t\s+share", r"never\s+share",
+            r"do\s+not\s+provide", r"don'?t\s+provide", r"never\s+give",
+            r"do\s+not\s+click", r"don'?t\s+click", r"avoid\s+clicking",
+            r"warning\s*:.*scam", r"signs\s+of\s+(?:a\s+)?(?:financial\s+)?scam",
+            r"beware\s+of", r"alert\s*:.*scam", r"this\s+message\s+shows\s+signs",
+            r"do\s+not\s+enter", r"don'?t\s+enter",
+        ]
+        if any(re.search(p, message_lower) for p in warning_phrases):
+            return {
+                "is_scam": False,
+                "scam_type": "none",
+                "confidence": 0.0,
+                "method": "rule_based",
+                "note": "warning_or_educational_message",
+            }
+
         indicators = {
             'phishing': {
                 'keywords': ['verify', 'suspended', 'locked', 'otp', 'suspicious activity'],
@@ -79,8 +99,7 @@ class RuleBasedScamDetectionTool(BaseTool):
                 'patterns': [r'legal.*action', r'arrest.*warrant']
             }
         }
-        
-        message_lower = message.lower()
+
         scores = {}
         
         for scam_type, data in indicators.items():
@@ -137,9 +156,13 @@ class LLMSemanticAnalysisTool(BaseTool):
     
     def __init__(self):
         super().__init__()
+        # Custom http_client - avoids 'proxies' ValidationError with newer openai pkg
+        _client = httpx.Client()
         self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0.2
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            temperature=0.2,
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            http_client=_client,
         )
         self.output_parser = PydanticOutputParser(pydantic_object=LLMScamOutput)
     
@@ -150,14 +173,19 @@ class LLMSemanticAnalysisTool(BaseTool):
 
 Analyze this message by understanding CONTEXT, INTENT, and MEANING - not just keywords.
 
+INTENT (most important):
+- If the message is WARNING or ADVISING the user (e.g. "Do not share OTP", "Warning: signs of scam", "Beware of") → is_scam = false.
+- If the message is REQUESTING or ASKING the user to do something risky (share OTP, click link, pay, verify account) → is_scam = true.
+- Same words can mean opposite things: "Share your OTP" = scam; "Do not share OTP" = not scam. Decide by intent.
+
 CRITICAL SCAM INDICATORS:
-1. **Credential Requests**: Asking for OTP, password, PIN, CVV is ALWAYS a scam
+1. **Credential Requests**: Asking for OTP, password, PIN, CVV = SCAM. Telling user NOT to share = NOT SCAM.
 2. **Phishing Pretexts**: 
    - "Suspicious activity detected" + credential request = PHISHING
    - "Secure your account" + share OTP = PHISHING
    - Any legitimate company NEVER asks for OTP/password via message
 3. **Context Matters**: 
-   - "Share OTP" in any context = SCAM
+   - "Share OTP" (requesting) = SCAM. "Do not share OTP" (warning) = NOT SCAM.
    - "We detected..." + action request = SCAM
    - Urgency + credential request = SCAM
 
@@ -215,9 +243,11 @@ BE VERY STRICT: Any OTP/password request = SCAM (confidence > 0.9)
                 'method': 'llm_semantic_error'
             }
 
-# HYBRID DETECTION TOOL cOMBINES BOTH
-
-from pydantic import PrivateAttr
+# HYBRID DETECTION TOOL – 3-LAYER PIPELINE (handles all input types)
+#
+# Layer 1: Warning/safe phrases (in RuleBasedScamDetectionTool) → not scam, skip rest.
+# Layer 2: Rule-based → clear scam (high conf) or clear not-scam (zero score).
+# Layer 3: LLM for intent when ambiguous → same words, different intents (e.g. "do not share" vs "share").
 
 class HybridScamDetectionTool(BaseTool):
     name: str = "hybrid_scam_detection"
@@ -226,38 +256,50 @@ class HybridScamDetectionTool(BaseTool):
     """
     args_schema: Type[BaseModel] = HybridDetectionInput
 
-    _rule_tool: RuleBasedScamDetectionTool = PrivateAttr(default=None)
-    _llm_tool: LLMSemanticAnalysisTool = PrivateAttr(default=None)
+    def _run(self, message: str, history: Optional[list] = None) -> dict:
+        rule_tool = RuleBasedScamDetectionTool()
+        rule_result = rule_tool._run(message)
 
-    def _run(self, message: str) -> dict:
-        # ✅ Lazy initialization (Pydantic-safe)
-        if self._rule_tool is None:
-            self._rule_tool = RuleBasedScamDetectionTool()
-        if self._llm_tool is None:
-            self._llm_tool = LLMSemanticAnalysisTool()
+        # If rule layer already decided "not scam" with a note (e.g. warning message), trust it
+        if rule_result.get("note") == "warning_or_educational_message":
+            return {
+                "is_scam": False,
+                "scam_type": "none",
+                "confidence": 0.0,
+                "method": "rule_based",
+            }
 
-        rule_result = self._rule_tool._run(message)
+        conf = rule_result.get("confidence", 0.0)
+        rule_scam = rule_result.get("is_scam", False)
+        msg_lower = message.lower()
 
-        needs_llm = (
-            (rule_result["is_scam"] and rule_result["confidence"] < 0.7) or
-            (not rule_result["is_scam"] and rule_result["confidence"] > 0.3) or
-            any(word in message.lower() for word in ["otp", "password", "pin", "cvv", "share"])
-        )
+        # Use LLM when intent is ambiguous (handles all input types better)
+        risky_keywords = any(w in msg_lower for w in ["otp", "password", "pin", "cvv", "share", "verify", "click", "link", "account", "suspended", "blocked"])
+        warning_keywords = any(w in msg_lower for w in ["do not", "don't", "never share", "warning", "beware", "avoid", "signs of"])
+        ambiguous = warning_keywords and risky_keywords  # could be warning or scam
+        uncertain_rules = (rule_scam and conf < 0.85) or (not rule_scam and conf > 0.2) or ambiguous
+
+        needs_llm = risky_keywords or uncertain_rules
 
         if needs_llm:
-            llm_result = self._llm_tool._run(message)
-
-            combined_confidence = (
-                llm_result["confidence"] * 0.7 +
-                rule_result["confidence"] * 0.3
-            )
-
-            return {
-                "is_scam": llm_result["is_scam"] or rule_result["is_scam"],
-                "scam_type": llm_result["scam_type"] or rule_result["scam_type"],
-                "confidence": round(combined_confidence, 2),
-                "method": "hybrid",
-            }
+            try:
+                llm_tool = LLMSemanticAnalysisTool()
+                llm_result = llm_tool._run(message)
+                # Only use LLM result if it didn't fail (method not llm_semantic_error)
+                if llm_result.get("method") != "llm_semantic_error":
+                    combined_confidence = (
+                        llm_result["confidence"] * 0.7 +
+                        rule_result["confidence"] * 0.3
+                    )
+                    return {
+                        "is_scam": llm_result["is_scam"] or rule_result["is_scam"],
+                        "scam_type": llm_result["scam_type"] or rule_result["scam_type"],
+                        "confidence": round(combined_confidence, 2),
+                        "method": "hybrid",
+                    }
+            except Exception:
+                # LLM failed: use rule result so we never hide a clear scam
+                pass
 
         return {
             "is_scam": rule_result["is_scam"],
@@ -299,5 +341,7 @@ class UrgencyDetectionTool(BaseTool):
             'urgency_score': score,
             'keywords_found': found
         }
-        
-        ScamDetectionTool = HybridScamDetectionTool
+
+
+# Main tool used by API: hybrid (rules + LLM)
+ScamDetectionTool = HybridScamDetectionTool
