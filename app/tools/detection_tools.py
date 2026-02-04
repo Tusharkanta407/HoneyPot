@@ -10,6 +10,7 @@ from typing import Optional, Type
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
+from app.utils.constants import OPENROUTER_BASE, OPENAI_API_KEY, OPENAI_MODEL
 
 
 class ScamDetectionInput(BaseModel):
@@ -156,12 +157,12 @@ class LLMSemanticAnalysisTool(BaseTool):
     
     def __init__(self):
         super().__init__()
-        # Custom http_client - avoids 'proxies' ValidationError with newer openai pkg
         _client = httpx.Client()
         self.llm = ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            model=OPENAI_MODEL,
             temperature=0.2,
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_key=OPENAI_API_KEY,
+            openai_api_base=OPENROUTER_BASE,
             http_client=_client,
         )
         self.output_parser = PydanticOutputParser(pydantic_object=LLMScamOutput)

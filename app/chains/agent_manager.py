@@ -4,6 +4,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Dict, Any, List
 from app.personas.library import get_best_persona, ALL_PERSONAS, Persona
+from app.utils.constants import OPENROUTER_BASE, OPENAI_API_KEY, OPENAI_MODEL
 
 # Custom HTTP client - avoids LangChain passing 'proxies' to OpenAI (rejected by newer openai pkg)
 _http_client = httpx.Client()
@@ -15,12 +16,13 @@ class AgentManager:
 
     @property
     def llm(self):
-        """Lazy init. Use custom http_client so 'proxies' is never passed to OpenAI client."""
+        """Lazy init. Uses OpenRouter (openrouter.ai) when OPENAI_API_BASE is set."""
         if self._llm is None:
             self._llm = ChatOpenAI(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                model=OPENAI_MODEL,
                 temperature=0.7,
-                openai_api_key=os.getenv("OPENAI_API_KEY"),
+                openai_api_key=OPENAI_API_KEY,
+                openai_api_base=OPENROUTER_BASE,
                 http_client=_http_client,
             )
         return self._llm
@@ -51,12 +53,13 @@ class AgentManager:
             is_new_persona = True
 
         # 2. PROMPT CONSTRUCTION
-        # Convert history to string
+        # Convert history to string — "scammer" = other party, "agent" = your previous replies
         history_text = ""
         for h in history:
             sender = h.get("sender", "unknown")
             text = h.get("text", "")
-            history_text += f"{sender}: {text}\n"
+            label = "OTHER" if sender == "scammer" else "YOU"
+            history_text += f"{label}: {text}\n"
 
         system_prompt = f"""
 {persona.system_prompt}
@@ -66,15 +69,16 @@ YOUR GOAL: {persona.goal}
 STYLE GUIDE:
 {persona.style_guide}
 
-CURRENT SCENARIO:
-You are in a chat. You suspect or know the other person is a scammer (or a stranger).
-Act your role perfecty.
-NEVER break character. 
+CONVERSATION RULES:
+- In the history, "OTHER" = the other person (possible scammer). "YOU" = your own previous replies.
+- Reply ONLY as your character ({persona.name}). Keep your reply to 1-3 short sentences — this is chat, not email.
+- Do NOT say you are an AI, a bot, or that this is a test. Never break character.
+- Stay in role so the conversation feels natural and the other party keeps engaging.
 """
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
-            ("user", f"CONVERSATION HISTORY:\n{history_text}\n\nNEW MESSAGE:\n{msg_text}\n\nReply:")
+            ("user", f"CONVERSATION SO FAR:\n{history_text}\n\nNEW MESSAGE FROM OTHER:\n{msg_text}\n\nYour reply (1-3 sentences, in character):")
         ])
         
         # 3. GENERATION

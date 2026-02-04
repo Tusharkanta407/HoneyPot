@@ -1,5 +1,7 @@
 # Honeypot AI — Project Tasks
 
+See **WIN_ROADMAP.md** for analysis vs finals.md and the path to deploy.
+
 ---
 
 ## PHASE 1 — PROJECT SETUP
@@ -11,39 +13,39 @@
 
 ---
 
-## PHASE 2 — SESSION & MEMORY(Tushar)
+## PHASE 2 — SESSION & MEMORY (Tushar)
 
-- [ ] Implement session_store.py
-- [ ] Create session using sessionId
-- [ ] Store messages per session
-- [ ] Track total messages exchanged
-- [ ] Mark session as completed
+- [x] Implement session_store.py
+- [x] Create session using sessionId
+- [x] Store messages per session
+- [x] Track total messages exchanged
+- [x] Mark session as completed
 
 ---
 
-## PHASE 3 — SCAM DETECTION(Sradha)
+## PHASE 3 — SCAM DETECTION (Sradha)
 
-- [ ] Integrate scam_detector_agent.py
-- [ ] Call detection ONLY on first message
-- [ ] Store is_scam, scam_type, confidence
-- [ ] Handle non-scam gracefully
+- [x] Integrate scam detection (ScamDetectionTool)
+- [x] Run detection until scam confirmed (then keep state)
+- [x] Store is_scam, scam_type, confidence
+- [x] Handle non-scam gracefully (neutral persona)
 
 ---
 
 ## PHASE 4 — PERSONA STRATEGY
 
-- [ ] Define persona per scam type
-- [ ] Lock persona per session
-- [ ] Generate believable human replies
-- [ ] Ensure no detection leakage
+- [x] Define persona per scam type
+- [x] Lock persona per session
+- [x] Generate believable human replies
+- [x] Ensure no detection leakage
 
 ---
 
 ## PHASE 5 — MULTI-TURN ENGAGEMENT
 
-- [ ] Continue conversation using memory
-- [ ] Use conversationHistory if provided
-- [ ] Adapt replies dynamically
+- [x] Continue conversation using memory
+- [x] Use conversationHistory if provided (session messages)
+- [x] Adapt replies dynamically (persona + history)
 
 ---
 

@@ -1,3 +1,5 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import logging
 import traceback
 from typing import Optional, List, Dict, Any
@@ -8,8 +10,11 @@ import os
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+
+import os
+prefix = os.getenv("OPENAI_API_KEY", "")[:10]
+suffix = os.getenv("OPENAI_API_KEY", "")[-6:]  # last 6 chars
+print("APP key prefix:", prefix, "suffix:", suffix)
 
 from app.memory.session_store import (
     create_session,
@@ -136,14 +141,14 @@ def honeypot_endpoint(payload: IncomingModel):
         
         return {
             "status": "success",
+            "reply": reply_text,
             "sessionId": session_id,
             "is_scam": s_final["is_scam"],
             "scam_type": s_final["scam_type"],
             "generated_response": reply_text,
             "persona": s_final["persona"],
             "confidence": s_final["confidence"],
-            # TODO: Add extracted intelligence here
-            "intelligence": s_final["extracted"]
+            "intelligence": s_final["extracted"],
         }
 
     except Exception as e:
