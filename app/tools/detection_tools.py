@@ -291,14 +291,18 @@ class HybridScamDetectionTool(BaseTool):
 
         # Use LLM when intent is ambiguous (handles all input types better)
         risky_keywords = any(w in msg_lower for w in [
+            # credentials
             "otp", "password", "pin", "cvv",
-            "share", "verify", "click", "link",
-            "account", "suspended", "blocked",
+            # common phishing verbs
+            "share", "verify", "click", "link", "login",
+            # account scare tactics
+            "account", "suspended", "blocked", "locked",
             # job/task scam signals
-            "work from home", "wfh", "part-time", "online job", "registration", "fee", "refundable", "task",
-            "whatsapp", "telegram",
+            "work from home", "wfh", "part-time", "part time", "online job",
+            "registration", "activation", "fee", "refundable", "task", "simple task",
+            "training material", "hr", "telegram", "whatsapp",
             # payment rails
-            "upi", "transfer", "ifsc",
+            "upi", "transfer", "ifsc", "payment", "pay",
         ])
         warning_keywords = any(w in msg_lower for w in ["do not", "don't", "never share", "warning", "beware", "avoid", "signs of"])
         ambiguous = warning_keywords and risky_keywords  # could be warning or scam

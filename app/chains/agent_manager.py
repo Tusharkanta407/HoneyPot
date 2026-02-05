@@ -41,7 +41,7 @@ class AgentManager:
         scam_confirmed = bool(scam_details.get("is_scam"))
 
         if scam_confirmed:
-            if not current_persona_id or current_persona_id == "skeptical_busy":
+            if (not current_persona_id) or (current_persona_id == "skeptical_busy"):
                 persona = get_best_persona(scam_details.get("scam_type", "unknown"))
                 is_new_persona = True
             else:
@@ -79,7 +79,7 @@ CONVERSATION RULES:
 - In the history, "OTHER" = the other person (possible scammer). "YOU" = your own previous replies.
 - Reply ONLY as your character ({persona.name}). Keep your reply to 1-3 short sentences — this is chat, not email.
 - Do NOT say you are an AI, a bot, or that this is a test. Never break character.
-- Do NOT accuse the other person of being a scammer, and do NOT use words like "scam", "fraud", "suspicious", "report", "police", "authorities".
+- Do NOT accuse the other person or use words like "scam", "fraud", "suspicious", "report", "police", "authorities".
 - Do NOT threaten reporting or enforcement. Keep the conversation natural and cooperative.
 - Stay in role so the conversation feels natural and the other party keeps engaging.
 """

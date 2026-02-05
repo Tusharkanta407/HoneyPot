@@ -2,7 +2,7 @@
 # app/memory/store.py
 import threading
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict
 
 _lock = threading.Lock()
 _sessions: Dict[str, Dict[str, Any]] = {}
@@ -14,6 +14,7 @@ def create_session(session_id: str) -> Dict[str, Any]:
         _sessions[session_id] = {
             "sessionId": session_id,
             "messages": [],   # list of {sender,text,timestamp}
+            # Detection state (defaults: not a scam until proven otherwise)
             "is_scam": False,
             "scam_type": "none",
             "confidence": 0.0,
@@ -26,7 +27,7 @@ def create_session(session_id: str) -> Dict[str, Any]:
                 "suspiciousKeywords": []
             },
             "total_messages": 0,
-            "completed": False,  # final callback sent
+            "completed": False,  # final callback sent (or session ended)
             # idle-timeout callback support (if scammer stops early)
             "last_scammer_ts": None,  # epoch seconds
             "idle_version": 0,  # increments on each scammer message
@@ -50,7 +51,7 @@ def append_message(session_id: str, message: Dict[str, Any]) -> None:
             s["last_scammer_ts"] = time.time()
             s["idle_version"] = int(s.get("idle_version") or 0) + 1
 
-def replace_messages(session_id: str, messages: List[Dict[str, Any]]) -> None:
+def replace_messages(session_id: str, messages: list[Dict[str, Any]]) -> None:
     """
     Replace session messages with platform-provided conversationHistory (normalized),
     without treating them as a new live scammer message (so we don't trigger idle timers).
