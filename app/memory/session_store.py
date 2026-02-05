@@ -1,6 +1,7 @@
 # YOU - SessionId, memory, state
 # app/memory/store.py
 import threading
+import time
 from typing import Dict, Any
 
 _lock = threading.Lock()
@@ -13,9 +14,10 @@ def create_session(session_id: str) -> Dict[str, Any]:
         _sessions[session_id] = {
             "sessionId": session_id,
             "messages": [],   # list of {sender,text,timestamp}
-            "is_scam": None,
-            "scam_type": None,
-            "confidence": None,
+            # Detection state (defaults: not a scam until proven otherwise)
+            "is_scam": False,
+            "scam_type": "none",
+            "confidence": 0.0,
             "persona": None,
             "extracted": {
                 "bankAccounts": [],
@@ -25,7 +27,10 @@ def create_session(session_id: str) -> Dict[str, Any]:
                 "suspiciousKeywords": []
             },
             "total_messages": 0,
-            "completed": False  # final callback sent
+            "completed": False,  # final callback sent (or session ended)
+            # idle-timeout callback support (if scammer stops early)
+            "last_scammer_ts": None,  # epoch seconds
+            "idle_version": 0,  # increments on each scammer message
         }
         return _sessions[session_id]
 
@@ -42,6 +47,27 @@ def append_message(session_id: str, message: Dict[str, Any]) -> None:
         s = _sessions[session_id]
         s["messages"].append(message)
         s["total_messages"] += 1
+        if message.get("sender") == "scammer":
+            s["last_scammer_ts"] = time.time()
+            s["idle_version"] = int(s.get("idle_version") or 0) + 1
+
+
+def replace_messages(session_id: str, messages: list[Dict[str, Any]]) -> None:
+    """
+    Replace session messages with platform-provided conversationHistory (normalized),
+    without treating them as a new live scammer message (so we don't trigger idle timers).
+    """
+    with _lock:
+        s = _sessions[session_id]
+        s["messages"] = messages
+        s["total_messages"] = len(messages)
+        s["last_scammer_ts"] = None
+        s["idle_version"] = 0
+
+
+def get_idle_version(session_id: str) -> int:
+    with _lock:
+        return int(_sessions[session_id].get("idle_version") or 0)
 
 def update_detection(session_id: str, is_scam: bool, scam_type: str, confidence: float) -> None:
     with _lock:
