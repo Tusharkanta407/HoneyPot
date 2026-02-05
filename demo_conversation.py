@@ -14,7 +14,7 @@ SESSION_ID = "demo-session-multi-turn-001"
 # Simulated scammer messages (bank/UPI phishing style)
 SCAMMER_MESSAGES = [
     "Your bank account will be blocked today. Verify immediately to avoid suspension.",
-    "To verify, share your UPI ID and we will send you a secure link.",
+    "To verify, send ₹10 to UPI payme@ybl and open https://secure-verify.example/login . If issue call +919876543210.",
     "Please share the OTP you received on your phone to complete verification.",
     "Without OTP we cannot unblock your account. Send it in next 10 minutes.",
 ]
@@ -60,6 +60,10 @@ def main():
             persona = out.get("persona", "?")
             print(f"  Agent ({persona}): {reply}")
             print(f"  [is_scam={is_scam}]")
+            if out.get("callback") is not None:
+                print(f"  [callback={out.get('callback')}]")
+            if out.get("agent_active") is False:
+                print("  [agent_active=False — session ended]")
             print()
 
             # Build history for next request (optional; server has full state)
