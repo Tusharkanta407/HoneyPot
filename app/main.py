@@ -1,8 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 import logging
 import traceback
 from typing import Optional, List, Dict, Any
+import threading
+import time
 
 try:
     import openai
@@ -26,10 +28,12 @@ from app.memory.session_store import (
     session_exists,
     get_session,
     append_message,
+    replace_messages,
     update_detection,
     update_persona,
     add_extracted,
     mark_completed,
+    get_idle_version,
 )
 from app.tools.detection_tools import ScamDetectionTool
 # NEW: Import the Manager
@@ -39,10 +43,49 @@ from app.callbacks.guvi_callback import send_guvi_callback
 
 app = FastAPI(title="Honeypot AI")
 
+# --- API KEY AUTH (finals.md requirement) ---
+def require_api_key(x_api_key: str = Header(default="", alias="x-api-key")) -> None:
+    expected = os.getenv("HONEYPOT_API_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=500, detail="HONEYPOT_API_KEY is not set on server.")
+    if x_api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid x-api-key")
+
 # Initialize Global Tools
 _scam_tool = ScamDetectionTool()
 _agent_manager = AgentManager()
 _extract_tool = ComprehensiveExtractionTool()
+
+
+def _schedule_idle_callback(session_id: str) -> None:
+    """
+    If the scammer stops early (platform stops sending requests), still send the mandatory
+    GUVI final callback after an idle timeout.
+    """
+    idle_timeout_s = int(os.getenv("SCAM_IDLE_TIMEOUT_S", "90"))
+    version = get_idle_version(session_id)
+
+    def _on_idle(exp_version: int) -> None:
+        s = get_session(session_id)
+        if not s or s.get("completed"):
+            return
+        if not bool(s.get("is_scam")):
+            return
+        if int(s.get("idle_version") or 0) != exp_version:
+            return
+        last_ts = s.get("last_scammer_ts")
+        if last_ts is None:
+            return
+        if (time.time() - float(last_ts)) < idle_timeout_s:
+            return
+
+        res = send_guvi_callback(s)
+        if res.get("ok"):
+            mark_completed(session_id)
+
+    t = threading.Timer(idle_timeout_s, _on_idle, args=(version,))
+    t.daemon = True
+    t.start()
 
 class MessageModel(BaseModel):
     sender: str
@@ -60,7 +103,7 @@ def root():
     return {"status": "ok", "message": "honeypot-agent-active"}
 
 @app.post("/honeypot")
-def honeypot_endpoint(payload: IncomingModel):
+def honeypot_endpoint(payload: IncomingModel, _auth: None = Depends(require_api_key)):
     """
     Core Logic Loop:
     1. Input: Receive message.
@@ -77,6 +120,24 @@ def honeypot_endpoint(payload: IncomingModel):
         # 1. SETUP SESSION
         if not session_exists(session_id):
             create_session(session_id)
+
+        # If platform provides conversationHistory, sync it into our session memory.
+        # finals.md uses sender=user for our replies; internally we store those as sender=agent.
+        if payload.conversationHistory:
+            normalized = []
+            for m in payload.conversationHistory:
+                sender = (m.get("sender") or "").lower()
+                norm_sender = "agent" if sender == "user" else sender or "unknown"
+                normalized.append(
+                    {
+                        "sender": norm_sender,
+                        "text": m.get("text", ""),
+                        "timestamp": m.get("timestamp"),
+                    }
+                )
+            current = get_session(session_id).get("messages") or []
+            if len(normalized) > len(current):
+                replace_messages(session_id, normalized)
         
         # Append incoming message to memory
         msg_in = {
@@ -85,6 +146,10 @@ def honeypot_endpoint(payload: IncomingModel):
             "timestamp": payload.message.timestamp,
         }
         append_message(session_id, msg_in)
+
+        # Schedule idle-timeout callback after each scammer message
+        if payload.message.sender == "scammer":
+            _schedule_idle_callback(session_id)
         
         # Load up-to-date session
         session = get_session(session_id)
@@ -227,29 +292,21 @@ def honeypot_endpoint(payload: IncomingModel):
         s_final = get_session(session_id)
         extracted = s_final.get("extracted") or {}
 
-        def _intel_category_count(ex: Dict[str, Any]) -> int:
-            """Count how many high-value categories we have at least once."""
-            keys = ("bankAccounts", "upiIds", "phishingLinks", "phoneNumbers")
-            return sum(1 for k in keys if len(ex.get(k) or []) > 0)
+        def _has_high_value_intel(ex: Dict[str, Any]) -> bool:
+            return any(
+                len(ex.get(k) or []) > 0
+                for k in ("bankAccounts", "upiIds", "phishingLinks", "phoneNumbers")
+            )
 
         scammer_turns = sum(1 for m in (s_final.get("messages") or []) if m.get("sender") == "scammer")
-        # Default strategy for hackathon scoring:
-        # - Engage up to ~10 scammer turns for depth
-        # - Aim for at least 2 intel categories before ending (UPI/link/phone/bank)
-        # - Still keep a hard cap to avoid infinite loops
-        SCAM_MAX_MESSAGES = int(os.getenv("SCAM_MAX_MESSAGES", "20"))  # total messages exchanged (scammer+agent)
-        SCAM_TARGET_SCAMMER_TURNS = int(os.getenv("SCAM_TARGET_SCAMMER_TURNS", "10"))
-        INTEL_MIN_CATEGORIES = int(os.getenv("INTEL_MIN_CATEGORIES", "2"))
-        intel_cats = _intel_category_count(extracted)
+        SCAM_MAX_MESSAGES = int(os.getenv("SCAM_MAX_MESSAGES", "18"))
+        SCAM_MIN_SCAMMER_TURNS = int(os.getenv("SCAM_MIN_SCAMMER_TURNS", "3"))
 
         should_terminate = (
             bool(s_final.get("is_scam"))
             and not bool(s_final.get("completed"))
             and (
-                # Primary: end after enough engagement depth (10 scammer turns),
-                # even if we failed to reach 2 categories.
-                (scammer_turns >= SCAM_TARGET_SCAMMER_TURNS)
-                # Secondary: hard cap on total messages
+                (scammer_turns >= SCAM_MIN_SCAMMER_TURNS and _has_high_value_intel(extracted))
                 or (int(s_final.get("total_messages") or 0) >= SCAM_MAX_MESSAGES)
             )
         )

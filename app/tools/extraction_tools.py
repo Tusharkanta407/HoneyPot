@@ -49,9 +49,20 @@ class BankDetailsExtractionTool(BaseTool):
     def _run(self, text: str) -> dict:
         """Extract bank details"""
         
-        # Account numbers (9-18 digits)
-        account_pattern = r'\b\d{9,18}\b'
-        accounts = re.findall(account_pattern, text)
+        # Account numbers (typically 11-18 digits).
+        # Avoid misclassifying phone numbers like +91XXXXXXXXXX as bank accounts.
+        account_pattern = r'\b\d{11,18}\b'
+        raw_accounts = re.findall(account_pattern, text)
+        accounts = []
+        for a in raw_accounts:
+            # Exclude obvious Indian phone formats:
+            # - 0XXXXXXXXXX (11 digits)
+            # - 91XXXXXXXXXX (12 digits) when X starts 6-9
+            if len(a) == 11 and a.startswith("0") and a[1] in "6789":
+                continue
+            if len(a) == 12 and a.startswith("91") and a[2] in "6789":
+                continue
+            accounts.append(a)
         
         # IFSC codes
         ifsc_pattern = r'\b[A-Z]{4}0[A-Z0-9]{6}\b'

@@ -35,22 +35,28 @@ class AgentManager:
         """
         
         # 1. PERSONA SELECTION
+        # Keep persona consistent per session, but if scam becomes confirmed after
+        # initially being unknown/non-scam, switch away from skeptical_busy to a victim persona.
         current_persona_id = session.get("persona")
-        
-        if current_persona_id and current_persona_id in self.persona_map:
-            # Existing session - keep consistent
-            persona = self.persona_map[current_persona_id]
-            is_new_persona = False
-        else:
-            # New or Switch required
-            if scam_details.get("is_scam"):
-                 # Targeted persona
+        scam_confirmed = bool(scam_details.get("is_scam"))
+
+        if scam_confirmed:
+            if not current_persona_id or current_persona_id == "skeptical_busy":
                 persona = get_best_persona(scam_details.get("scam_type", "unknown"))
+                is_new_persona = True
             else:
-                # Neutral persona for monitoring
+                persona = self.persona_map.get(
+                    current_persona_id,
+                    get_best_persona(scam_details.get("scam_type", "unknown")),
+                )
+                is_new_persona = False
+        else:
+            if current_persona_id and current_persona_id in self.persona_map:
+                persona = self.persona_map[current_persona_id]
+                is_new_persona = False
+            else:
                 persona = self.persona_map["skeptical_busy"]
-            
-            is_new_persona = True
+                is_new_persona = True
 
         # 2. PROMPT CONSTRUCTION
         # Convert history to string — "scammer" = other party, "agent" = your previous replies
@@ -73,6 +79,8 @@ CONVERSATION RULES:
 - In the history, "OTHER" = the other person (possible scammer). "YOU" = your own previous replies.
 - Reply ONLY as your character ({persona.name}). Keep your reply to 1-3 short sentences — this is chat, not email.
 - Do NOT say you are an AI, a bot, or that this is a test. Never break character.
+- Do NOT accuse the other person of being a scammer, and do NOT use words like "scam", "fraud", "suspicious", "report", "police", "authorities".
+- Do NOT threaten reporting or enforcement. Keep the conversation natural and cooperative.
 - Stay in role so the conversation feels natural and the other party keeps engaging.
 """
 

@@ -91,6 +91,21 @@ class RuleBasedScamDetectionTool(BaseTool):
                 'keywords': ['profit', 'returns', 'guaranteed', 'crypto'],
                 'patterns': [r'\d+%.*(?:profit|returns)', r'guaranteed.*returns']
             },
+            'job_offer': {
+                'keywords': [
+                    'work from home', 'wfh', 'part-time', 'part time', 'online job',
+                    'daily earn', 'earn ₹', 'earn rs', 'registration', 'registration fee',
+                    'activation fee', 'refundable', 'simple tasks', 'training material',
+                    'hr team', 'telegram', 'whatsapp'
+                ],
+                'patterns': [
+                    r'work\s+from\s+home',
+                    r'part[\s-]?time',
+                    r'(?:registration|activation)\s+fee',
+                    r'(?:earn|income).*(?:daily|per\s+day)',
+                    r'(?:refundable|refund)',
+                ]
+            },
             'tech_support': {
                 'keywords': ['virus', 'infected', 'microsoft', 'tech support'],
                 'patterns': [r'computer.*virus', r'call.*immediately']
@@ -275,7 +290,16 @@ class HybridScamDetectionTool(BaseTool):
         msg_lower = message.lower()
 
         # Use LLM when intent is ambiguous (handles all input types better)
-        risky_keywords = any(w in msg_lower for w in ["otp", "password", "pin", "cvv", "share", "verify", "click", "link", "account", "suspended", "blocked"])
+        risky_keywords = any(w in msg_lower for w in [
+            "otp", "password", "pin", "cvv",
+            "share", "verify", "click", "link",
+            "account", "suspended", "blocked",
+            # job/task scam signals
+            "work from home", "wfh", "part-time", "online job", "registration", "fee", "refundable", "task",
+            "whatsapp", "telegram",
+            # payment rails
+            "upi", "transfer", "ifsc",
+        ])
         warning_keywords = any(w in msg_lower for w in ["do not", "don't", "never share", "warning", "beware", "avoid", "signs of"])
         ambiguous = warning_keywords and risky_keywords  # could be warning or scam
         uncertain_rules = (rule_scam and conf < 0.85) or (not rule_scam and conf > 0.2) or ambiguous

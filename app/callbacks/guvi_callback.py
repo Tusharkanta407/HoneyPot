@@ -20,34 +20,25 @@ def build_agent_notes(session: Dict[str, Any]) -> str:
     """
     agentNotes one-liner.
 
-    - Default: deterministic (no extra cost).
-    - If USE_LLM_AGENT_NOTES=1: generate a cleaner one-liner using a small slice
-      of scammer messages (keeps token usage low). Falls back to deterministic
-      if the LLM call fails.
+    - If USE_LLM_AGENT_NOTES=1: generate a clean one-line summary using a small slice
+      of scammer messages (keeps tokens low). Falls back to deterministic if LLM fails.
+    - Else: deterministic one-liner from keywords.
     """
-    extracted = session.get("extracted") or {}
-    upi = extracted.get("upiIds") or []
-    links = extracted.get("phishingLinks") or []
-    phones = extracted.get("phoneNumbers") or []
-    banks = extracted.get("bankAccounts") or []
+    scammer_msgs = [
+        (m.get("text") or "")
+        for m in (session.get("messages") or [])
+        if (m.get("sender") == "scammer")
+    ]
 
-    # Optional: LLM-generated note (short + cleaner)
     if os.getenv("USE_LLM_AGENT_NOTES", "0") == "1" and OPENAI_API_KEY:
         try:
-            scammer_msgs = [
-                (m.get("text") or "")
-                for m in (session.get("messages") or [])
-                if (m.get("sender") == "scammer")
-            ]
-            # Keep context small: first 2 + last 1 (or first 3 if short)
             sample = scammer_msgs[:3] if len(scammer_msgs) <= 6 else (scammer_msgs[:2] + scammer_msgs[-1:])
             convo = "\n".join(f"- {t}" for t in sample if t.strip())
-
             client = OpenAI(base_url=OPENROUTER_BASE, api_key=OPENAI_API_KEY)
             prompt = (
                 "Write ONE short sentence summarizing the scammer's tactics and goal. "
                 "Do not include counts, do not list extracted items, and do not mention being an AI.\n"
-                "Example style: 'Scammer used urgency and payment redirection to push a victim to share OTP via a phishing link.'\n\n"
+                "Example: 'Scammer used urgency and payment redirection to push the victim to share OTP via a phishing link.'\n\n"
                 f"Scammer messages:\n{convo}\n"
             )
             resp = client.chat.completions.create(
@@ -62,47 +53,24 @@ def build_agent_notes(session: Dict[str, Any]) -> str:
         except Exception as e:
             logging.error("LLM agentNotes failed, using fallback: %s", e)
 
-    scammer_text = " ".join(
-        (m.get("text") or "")
-        for m in (session.get("messages") or [])
-        if (m.get("sender") == "scammer")
-    ).lower()
-
+    scammer_text = " ".join(scammer_msgs).lower()
     tactics = []
     if any(w in scammer_text for w in ("urgent", "immediately", "expire", "blocked", "suspended", "final reminder")):
         tactics.append("urgency tactics")
-    if ("upi" in scammer_text) or banks or upi:
+    if any(w in scammer_text for w in ("upi", "transfer", "ifsc", "pay")):
         tactics.append("payment redirection")
-    if ("http://" in scammer_text) or ("https://" in scammer_text) or links:
-        tactics.append("phishing-link sharing")
+    if ("http://" in scammer_text) or ("https://" in scammer_text):
+        tactics.append("phishing link")
     if any(w in scammer_text for w in ("otp", "pin", "cvv", "password")):
-        tactics.append("credential requests")
-    if ("whatsapp" in scammer_text) or phones:
-        tactics.append("off-platform contact push")
+        tactics.append("credential request")
+    if any(w in scammer_text for w in ("whatsapp", "telegram")):
+        tactics.append("off-platform contact")
 
     if not tactics:
-        tactics_part = "suspicious persuasion tactics"
-    elif len(tactics) == 1:
-        tactics_part = tactics[0]
-    else:
-        tactics_part = ", ".join(tactics[:-1]) + " and " + tactics[-1]
-
-    # Mention what we captured, but keep it as a single short clause.
-    captured_bits = []
-    if upi:
-        captured_bits.append("UPI")
-    if banks:
-        captured_bits.append("bank account")
-    if phones:
-        captured_bits.append("phone number")
-    if links:
-        captured_bits.append("link")
-
-    captured_part = ""
-    if captured_bits:
-        captured_part = f"; captured {', '.join(captured_bits)} details"
-
-    return f"Scammer used {tactics_part}{captured_part}."
+        return "Scammer attempted to pressure the victim into completing a risky verification/payment process."
+    if len(tactics) == 1:
+        return f"Scammer used {tactics[0]} to push the victim into risky actions."
+    return f"Scammer used {', '.join(tactics[:-1])} and {tactics[-1]} to push the victim into risky actions."
 
 
 def build_guvi_payload(session: Dict[str, Any]) -> Dict[str, Any]:
