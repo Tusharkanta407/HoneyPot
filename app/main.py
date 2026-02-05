@@ -227,21 +227,29 @@ def honeypot_endpoint(payload: IncomingModel):
         s_final = get_session(session_id)
         extracted = s_final.get("extracted") or {}
 
-        def _has_high_value_intel(ex: Dict[str, Any]) -> bool:
-            return any(
-                len(ex.get(k) or []) > 0
-                for k in ("bankAccounts", "upiIds", "phishingLinks", "phoneNumbers")
-            )
+        def _intel_category_count(ex: Dict[str, Any]) -> int:
+            """Count how many high-value categories we have at least once."""
+            keys = ("bankAccounts", "upiIds", "phishingLinks", "phoneNumbers")
+            return sum(1 for k in keys if len(ex.get(k) or []) > 0)
 
         scammer_turns = sum(1 for m in (s_final.get("messages") or []) if m.get("sender") == "scammer")
-        SCAM_MAX_MESSAGES = int(os.getenv("SCAM_MAX_MESSAGES", "18"))
-        SCAM_MIN_SCAMMER_TURNS = int(os.getenv("SCAM_MIN_SCAMMER_TURNS", "3"))
+        # Default strategy for hackathon scoring:
+        # - Engage up to ~10 scammer turns for depth
+        # - Aim for at least 2 intel categories before ending (UPI/link/phone/bank)
+        # - Still keep a hard cap to avoid infinite loops
+        SCAM_MAX_MESSAGES = int(os.getenv("SCAM_MAX_MESSAGES", "20"))  # total messages exchanged (scammer+agent)
+        SCAM_TARGET_SCAMMER_TURNS = int(os.getenv("SCAM_TARGET_SCAMMER_TURNS", "10"))
+        INTEL_MIN_CATEGORIES = int(os.getenv("INTEL_MIN_CATEGORIES", "2"))
+        intel_cats = _intel_category_count(extracted)
 
         should_terminate = (
             bool(s_final.get("is_scam"))
             and not bool(s_final.get("completed"))
             and (
-                (scammer_turns >= SCAM_MIN_SCAMMER_TURNS and _has_high_value_intel(extracted))
+                # Primary: end after enough engagement depth (10 scammer turns),
+                # even if we failed to reach 2 categories.
+                (scammer_turns >= SCAM_TARGET_SCAMMER_TURNS)
+                # Secondary: hard cap on total messages
                 or (int(s_final.get("total_messages") or 0) >= SCAM_MAX_MESSAGES)
             )
         )

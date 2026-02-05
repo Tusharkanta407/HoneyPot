@@ -9,26 +9,17 @@ import httpx
 import time
 
 BASE_URL = "http://127.0.0.1:8000"
-SESSION_ID = "demo-session-multi-turn-001"
+# Use a fresh session each run so completed sessions don't affect testing
+SESSION_ID = f"demo-session-multi-turn-{int(time.time())}"
 
-# Simulated scammer messages (bank/UPI phishing style)
+# Simulated scammer messages (10-turn crypto/investment scam flow)
 SCAMMER_MESSAGES = [
-    "Hello, this is customer support from your bank. We need to verify your account urgently.",
-    
-    "Your account has suspicious activity. Please confirm your identity immediately to avoid suspension.",
-    
-    "Click this secure verification link https://account-verify-support.net to update your banking details.",
-    
-    "You must complete KYC verification today. Share your full name and OTP received on your phone.",
-    
-    "This is telecom department. Your SIM will be blocked due to verification failure. Contact +919876543210 for assistance.",
-    
-    "You are selected for special investment opportunity with guaranteed returns. Register at https://vip-invest-trading.live.",
-    
-    "To complete your verification, please send ₹100 test payment using UPI secureverify@okhdfcbank.",
-    
-    "If you do not respond within 30 minutes, your services may be permanently suspended."
+    "Your bank account will be blocked today. Verify immediately to avoid suspension.",
+    "To verify, send ₹10 to UPI payme@ybl and open https://secure-verify.example/login . If issue call +919876543210.",
+    "Please share the OTP you received on your phone to complete verification.",
+    "Without OTP we cannot unblock your account. Send it in next 10 minutes.",
 ]
+
 def send_message(client: httpx.Client, session_id: str, text: str, conversation_history: list) -> dict:
     payload = {
         "sessionId": session_id,
